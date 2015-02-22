@@ -276,6 +276,34 @@ pub fn extract<S>(start: <S as Source>::Sh, size: <S as Source>::Sh, array: &S) 
     }
 }
 
+pub struct TransposeFn<S>
+    where S: Source {
+    source: S
+}
+
+impl <'a, S, Sh> UnsafeFn<(&'a <S as Source>::Sh,)> for TransposeFn<S>
+    where S: Source<Sh=Cons<Cons<Sh>>>
+        , Sh: Shape {
+    type Output = <S as Source>::Element;
+    unsafe fn unsafe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+        let &Cons(Cons(ref rest, x), y) = sh;
+        self.source.unsafe_index(&Cons(Cons(rest.clone(), y), x))
+    }
+    fn safe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+        let &Cons(Cons(ref rest, x), y) = sh;
+        self.source.index(&Cons(Cons(rest.clone(), y), x))
+    }
+}
+
+pub fn transpose<S, Sh>(array: &S) -> DArray<<S as Source>::Sh, TransposeFn<&S>>
+    where S: Source<Sh=Cons<Cons<Sh>>>
+        , Sh: Shape {
+    DArray {
+        shape: array.extent().clone(),
+        f: TransposeFn { source: array }
+    }
+}
+
 pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
     where S: Source {
     let size = array.extent().size();
@@ -364,5 +392,15 @@ mod tests {
         let indexes = compute_p(&m);
         let i = Cons(Cons(Z, 200), 21);
         assert_eq!(indexes.index(&i), indexes.extent().to_index(&i));
+    }
+
+    #[test]
+    fn transpose_test() {
+        let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
+        let m2 = transpose(&m);
+        let i0x1 = Cons(Cons(Z, 0), 1);
+        let i1x0 = Cons(Cons(Z, 1), 0);
+        assert_eq!(m.index(&i0x1), m2.index(&i1x0));
+        assert_eq!(m.index(&i1x0), m2.index(&i0x1));
     }
 }
