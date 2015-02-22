@@ -278,7 +278,7 @@ impl <'a, S> UnsafeFn<(&'a <S as Source>::Sh,)> for ExtractFn<S>
 pub fn extract<S>(start: <S as Source>::Sh, size: <S as Source>::Sh, array: S) -> DArray<<S as Source>::Sh, ExtractFn<S>>
     where S: Source {
     DArray {
-        shape: size.clone(),
+        shape: size,
         f: ExtractFn { source: array, start: start }
     }
 }
@@ -352,10 +352,10 @@ pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArra
         , S: Source<Sh=Cons<Sh>>
         , F: FnMut(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element
         , <S as Source>::Element: Clone {
-    let Cons(shape, size) = array.extent().clone();
+    let &Cons(ref shape, size) = array.extent();
     let new_size = shape.size();
     let mut elems = Vec::with_capacity(new_size);
-    for offset in (0..shape.size()).map(|i| i * size) {
+    for offset in (0..new_size).map(|i| i * size) {
         let mut r = e.clone();
         for i in offset..(offset + size) {
             r = f(r, array.linear_index(i));
@@ -373,7 +373,7 @@ pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> U
         , S: Source<Sh=Cons<Sh>>
         , F: Fn(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element + Sync
         , <S as Source>::Element: Clone {
-    let Cons(shape, size) = array.extent().clone();
+    let &Cons(ref shape, size) = array.extent();
     let new_size = shape.size();
     let mut elems = vec![e.clone(); new_size];
     {
@@ -403,13 +403,14 @@ pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> U
 
 pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
     where S: Source {
-    let size = array.extent().size();
+    let extent = array.extent();
+    let size = extent.size();
     let mut elems = Vec::with_capacity(size);
     for i in 0..size {
         elems.push(array.linear_index(i));
     }
     UArray {
-        shape: array.extent().clone(),
+        shape: extent.clone(),
         elems: elems
     }
 }
@@ -417,7 +418,8 @@ pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Eleme
 pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
     where S: Source
         , <S as Source>::Element: Default + Clone {
-    let size = array.extent().size();
+    let extent = array.extent();
+    let size = extent.size();
     let mut elems = vec![Default::default(); size];
     {
         let len = elems.len();
@@ -439,7 +441,7 @@ pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Eleme
         }
     }
     UArray {
-        shape: array.extent().clone(),
+        shape: extent.clone(),
         elems: elems
     }
 }
