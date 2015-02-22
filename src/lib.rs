@@ -337,7 +337,7 @@ impl <'a, S1, S2, Sh, F, O> UnsafeFn<(&'a <S1 as Source>::Sh,)> for ZipWithFn<S1
     }
 }
 
-pub fn zip_with<'l, 'r, S1, S2, F, O>(lhs: &'l S1, rhs: &'r S2, f: F) -> DArray<<S1 as Source>::Sh, ZipWithFn<&'l S1, &'r S2, F>>
+pub fn zip_with<S1, S2, F, O>(lhs: S1, rhs: S2, f: F) -> DArray<<S1 as Source>::Sh, ZipWithFn<S1, S2, F>>
     where S1: Source
         , S2: Source<Sh=<S1 as Source>::Sh>
         , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
