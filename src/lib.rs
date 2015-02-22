@@ -347,6 +347,27 @@ pub fn zip_with<'l, 'r, S1, S2, F, O>(lhs: &'l S1, rhs: &'r S2, f: F) -> DArray<
     }
 }
 
+pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArray<Sh, <S as Source>::Element>
+    where Sh: Shape
+        , S: Source<Sh=Cons<Sh>>
+        , F: FnMut(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element
+        , <S as Source>::Element: Clone {
+    let Cons(shape, size) = array.extent().clone();
+    let new_size = shape.size();
+    let mut elems = Vec::with_capacity(new_size);
+    for offset in (0..shape.size()).map(|i| i * size) {
+        let mut r = e.clone();
+        for i in offset..(offset + size) {
+            r = f(r, array.linear_index(i));
+        }
+        elems.push(r);
+    }
+    UArray {
+        shape: shape.clone(),
+        elems: elems
+    }
+}
+
 pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
     where S: Source {
     let size = array.extent().size();
@@ -359,6 +380,7 @@ pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Eleme
         elems: elems
     }
 }
+
 pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
     where S: Source
         , <S as Source>::Element: Default + Clone {
@@ -446,6 +468,7 @@ mod tests {
         assert_eq!(m.index(&i0x1), m2.index(&i1x0));
         assert_eq!(m.index(&i1x0), m2.index(&i0x1));
     }
+
     #[test]
     fn zip_with_test() {
         let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
@@ -454,5 +477,13 @@ mod tests {
         let i1x0 = Cons(Cons(Z, 1), 0);
         assert_eq!(m2.index(&i0x1), 2);
         assert_eq!(m2.index(&i1x0), 4);
+    }
+
+    #[test]
+    fn fold_sequential() {
+        let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
+        let m2 = fold_s(|l, r| l + r, 0, &m);
+        assert_eq!(m2.index(&Cons(Z, 0)), 1);
+        assert_eq!(m2.index(&Cons(Z, 1)), 5);
     }
 }
