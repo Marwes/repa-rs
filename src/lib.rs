@@ -248,7 +248,7 @@ impl <'a, S, A, B, F> UnsafeFn<(&'a <S as Source>::Sh,)> for MapFn<S, F>
     }
 }
 
-pub fn map<S, F, B>(f: F, array: &S) -> DArray<<S as Source>::Sh, MapFn<&S, F>>
+pub fn map<S, F, B>(f: F, array: S) -> DArray<<S as Source>::Sh, MapFn<S, F>>
     where F: Fn(<S as Source>::Element) -> B, S: Source {
     DArray {
         shape: array.extent().clone(),
@@ -275,7 +275,7 @@ impl <'a, S> UnsafeFn<(&'a <S as Source>::Sh,)> for ExtractFn<S>
     }
 }
 
-pub fn extract<S>(start: <S as Source>::Sh, size: <S as Source>::Sh, array: &S) -> DArray<<S as Source>::Sh, ExtractFn<&S>>
+pub fn extract<S>(start: <S as Source>::Sh, size: <S as Source>::Sh, array: S) -> DArray<<S as Source>::Sh, ExtractFn<S>>
     where S: Source {
     DArray {
         shape: size.clone(),
@@ -302,7 +302,7 @@ impl <'a, S, Sh> UnsafeFn<(&'a <S as Source>::Sh,)> for TransposeFn<S>
     }
 }
 
-pub fn transpose<S, Sh>(array: &S) -> DArray<<S as Source>::Sh, TransposeFn<&S>>
+pub fn transpose<S, Sh>(array: S) -> DArray<<S as Source>::Sh, TransposeFn<S>>
     where S: Source<Sh=Cons<Cons<Sh>>>
         , Sh: Shape {
     DArray {
