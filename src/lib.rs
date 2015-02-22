@@ -347,6 +347,36 @@ pub fn zip_with<S1, S2, F, O>(lhs: S1, rhs: S2, f: F) -> DArray<<S1 as Source>::
     }
 }
 
+pub struct TraverseFn<S, T>
+    where S: Source {
+    source: S,
+    transform: T
+}
+
+impl <'a, S, Sh, T, B> Fn<(&'a Sh,)> for TraverseFn<S, T>
+    where Sh: Shape
+        , S: Source
+        , T: for<'b, 'c> Fn(&'b S, &'c Sh) -> B {
+    type Output = B;
+    extern "rust-call" fn call(&self, (sh,): (&Sh,)) -> B {
+        (self.transform)(&self.source, sh)
+    }
+}
+
+pub fn travserse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DArray<Sh, TraverseFn<S, T>>
+    where S: Source
+        , Sh: Shape
+        , F: FnOnce(&<S as Source>::Sh) -> Sh
+        , T: Fn(&S, &Sh) -> B {
+
+    let shape = new_shape(array.extent());
+    DArray {
+        shape: shape,
+        f: TraverseFn { source: array, transform: transform }
+    }
+}
+
+
 pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArray<Sh, <S as Source>::Element>
     where Sh: Shape
         , S: Source<Sh=Cons<Sh>>
