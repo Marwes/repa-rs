@@ -163,7 +163,7 @@ impl <S: Shape, E: Clone> UArray<S, E> {
     }
 }
 
-impl <E: Copy + Send + Sync, S: Shape> Source for UArray<S, E> {
+impl <E: Clone + Send + Sync, S: Shape> Source for UArray<S, E> {
     type Element = E;
     type Sh = S;
 
@@ -171,10 +171,10 @@ impl <E: Copy + Send + Sync, S: Shape> Source for UArray<S, E> {
         &self.shape
     }
     fn linear_index(&self, index: usize) -> E {
-        self.elems[index]
+        self.elems[index].clone()
     }
     unsafe fn unsafe_linear_index(&self, index: usize) -> <Self as Source>::Element {
-        *self.elems.get_unchecked(index)
+        self.elems.get_unchecked(index).clone()
     }
 }
 
