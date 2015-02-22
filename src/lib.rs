@@ -66,8 +66,18 @@ pub trait Source: Sync {
     type Sh: Shape;
 
     fn extent(&self) -> &<Self as Source>::Sh;
-    fn index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element;
     fn linear_index(&self, index: usize) -> <Self as Source>::Element;
+
+    fn index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element {
+        self.linear_index(self.extent().to_index(index))
+    }
+
+    unsafe fn unsafe_index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element {
+        self.unsafe_linear_index(self.extent().to_index(index))
+    }
+    unsafe fn unsafe_linear_index(&self, index: usize) -> <Self as Source>::Element {
+        self.index(&self.extent().from_index(index))
+    }
 }
 
 impl <'a, S> Source for &'a S
@@ -83,6 +93,12 @@ impl <'a, S> Source for &'a S
     }
     fn linear_index(&self, index: usize) -> <Self as Source>::Element {
         (**self).linear_index(index)
+    }
+    unsafe fn unsafe_index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element {
+        (**self).unsafe_index(index)
+    }
+    unsafe fn unsafe_linear_index(&self, index: usize) -> <Self as Source>::Element {
+        (**self).unsafe_linear_index(index)
     }
 }
 
@@ -147,24 +163,36 @@ impl <E: Copy + Send + Sync, S: Shape> Source for UArray<S, E> {
     fn extent(&self) -> &S {
         &self.shape
     }
-    fn index(&self, index: &S) -> E {
-        self.elems[self.shape.to_index(index)]
-    }
     fn linear_index(&self, index: usize) -> E {
         self.elems[index]
+    }
+    unsafe fn unsafe_linear_index(&self, index: usize) -> <Self as Source>::Element {
+        *self.elems.get_unchecked(index)
+    }
+}
+
+trait UnsafeFn<Args> {
+    type Output;
+    unsafe fn unsafe_call(&self, args: Args) -> <Self as UnsafeFn<Args>>::Output { self.safe_call(args) }
+    fn safe_call(&self, args: Args) -> <Self as UnsafeFn<Args>>::Output;
+}
+impl <F, Args> UnsafeFn<Args> for F
+    where F: Fn<Args> {
+    type Output = <F as Fn<Args>>::Output;
+    fn safe_call(&self, args: Args) -> <Self as UnsafeFn<Args>>::Output {
+        self.call(args)
     }
 }
 
 pub struct DArray<S, F>
-    where S: Shape
-        , F: for<'a> Fn<(&'a S,)> {
+    where S: Shape {
     shape: S,
     f: F
 }
 
 impl <S, F, E: Send + Sync> Source for DArray<S, F>
     where S: Shape
-        , F: for<'a> Fn(&'a S) -> E + Sync {
+        , F: for<'a> UnsafeFn(&'a S) -> E + Sync {
     type Element = E;
     type Sh = S;
 
@@ -172,10 +200,16 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
         &self.shape
     }
     fn index(&self, index: &<Self as Source>::Sh) -> E {
-        (self.f)(index)
+        self.f.safe_call((index,))
     }
     fn linear_index(&self, index: usize) -> E {
-        (self.f)(&self.shape.from_index(index))
+        self.index(&self.shape.from_index(index))
+    }
+    unsafe fn unsafe_index(&self, index: &<Self as Source>::Sh) -> E {
+        self.f.unsafe_call((index,))
+    }
+    unsafe fn unsafe_linear_index(&self, index: usize) -> E {
+        self.unsafe_index(&self.shape.from_index(index))
     }
 }
 
@@ -192,12 +226,16 @@ pub struct MapFn<S, F> {
     f: F
 }
 
-impl <'a, S, A, B, F> Fn<(&'a <S as Source>::Sh,)> for MapFn<S, F>
+impl <'a, S, A, B, F> UnsafeFn<(&'a <S as Source>::Sh,)> for MapFn<S, F>
     where A: Send + Sync
         , F: Fn(A) -> B
         , S: Source<Element=A> {
     type Output = B;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
+    unsafe fn unsafe_call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
+        let e = self.source.unsafe_index(sh);
+        (self.f)(e)
+    }
+    fn safe_call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
         let e = self.source.index(sh);
         (self.f)(e)
     }
@@ -217,10 +255,14 @@ pub struct ExtractFn<S>
     start: <S as Source>::Sh,
 }
 
-impl <'a, S> Fn<(&'a <S as Source>::Sh,)> for ExtractFn<S>
+impl <'a, S> UnsafeFn<(&'a <S as Source>::Sh,)> for ExtractFn<S>
     where S: Source {
     type Output = <S as Source>::Element;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+    unsafe fn unsafe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+        let i = self.start.add_dim(sh);
+        self.source.unsafe_index(&i)
+    }
+    fn safe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
         let i = self.start.add_dim(sh);
         self.source.index(&i)
     }
