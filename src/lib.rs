@@ -16,6 +16,7 @@ pub trait Shape: Clone + Sync {
     fn zero_dim() -> Self;
     fn unit_dim() -> Self;
     fn add_dim(&self, other: &Self) -> Self;
+    fn intersect_dim(&self, other: &Self) -> Self;
     fn size(&self) -> usize;
     fn to_index(&self, other: &Self) -> usize;
     fn from_index(&self, other: usize) -> Self;
@@ -29,6 +30,8 @@ impl Shape for Z {
     fn unit_dim() -> Z { Z }
     #[inline]
     fn add_dim(&self, _: &Z) -> Z { Z }
+    #[inline]
+    fn intersect_dim(&self, _: &Z) -> Z { Z }
     #[inline]
     fn size(&self) -> usize { 1 }
     #[inline]
@@ -46,6 +49,10 @@ impl <T: Shape> Shape for Cons<T> {
     #[inline]
     fn add_dim(&self, other: &Cons<T>) -> Cons<T> {
         Cons(self.0.add_dim(&other.0), self.1 + other.1)
+    }
+    #[inline]
+    fn intersect_dim(&self, other: &Cons<T>) -> Cons<T> {
+        Cons(self.0.intersect_dim(&other.0), ::std::cmp::min(self.1, other.1))
     }
     #[inline]
     fn size(&self) -> usize { self.1 * self.0.size() }
@@ -304,6 +311,42 @@ pub fn transpose<S, Sh>(array: &S) -> DArray<<S as Source>::Sh, TransposeFn<&S>>
     }
 }
 
+pub struct ZipWithFn<S1, S2, F>
+    where S1: Source
+        , S2: Source {
+    lhs: S1,
+    rhs: S2,
+    f: F
+}
+
+impl <'a, S1, S2, Sh, F, O> UnsafeFn<(&'a <S1 as Source>::Sh,)> for ZipWithFn<S1, S2, F>
+    where Sh: Shape
+        , S1: Source<Sh=Sh>
+        , S2: Source<Sh=Sh>
+        , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
+    type Output = O;
+    unsafe fn unsafe_call(&self, (sh,): (&Sh,)) -> O {
+        let l = self.lhs.unsafe_index(sh);
+        let r = self.rhs.unsafe_index(sh);
+        (self.f)(l, r)
+    }
+    fn safe_call(&self, (sh,): (&Sh,)) -> O {
+        let l = self.lhs.index(sh);
+        let r = self.rhs.index(sh);
+        (self.f)(l, r)
+    }
+}
+
+pub fn zip_with<'l, 'r, S1, S2, F, O>(lhs: &'l S1, rhs: &'r S2, f: F) -> DArray<<S1 as Source>::Sh, ZipWithFn<&'l S1, &'r S2, F>>
+    where S1: Source
+        , S2: Source<Sh=<S1 as Source>::Sh>
+        , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
+    DArray {
+        shape: lhs.extent().intersect_dim(rhs.extent()),
+        f: ZipWithFn { lhs: lhs, rhs: rhs, f: f }
+    }
+}
+
 pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
     where S: Source {
     let size = array.extent().size();
@@ -402,5 +445,14 @@ mod tests {
         let i1x0 = Cons(Cons(Z, 1), 0);
         assert_eq!(m.index(&i0x1), m2.index(&i1x0));
         assert_eq!(m.index(&i1x0), m2.index(&i0x1));
+    }
+    #[test]
+    fn zip_with_test() {
+        let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
+        let m2 = zip_with(&m, &m, |l, r| l + r);
+        let i0x1 = Cons(Cons(Z, 0), 1);
+        let i1x0 = Cons(Cons(Z, 1), 0);
+        assert_eq!(m2.index(&i0x1), 2);
+        assert_eq!(m2.index(&i1x0), 4);
     }
 }
