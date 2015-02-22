@@ -368,6 +368,39 @@ pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArra
     }
 }
 
+pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> UArray<Sh, <S as Source>::Element>
+    where Sh: Shape
+        , S: Source<Sh=Cons<Sh>>
+        , F: Fn(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element + Sync
+        , <S as Source>::Element: Clone {
+    let Cons(shape, size) = array.extent().clone();
+    let new_size = shape.size();
+    let mut elems = vec![e.clone(); new_size];
+    {
+        let mut thread_guards = Vec::new();
+        let slices = os::num_cpus();
+        let slice_len = (new_size + slices - 1) / slices;
+        for (i, chunk) in elems.chunks_mut(slice_len).enumerate() {
+            let g = thread::scoped(move || {
+                let start = i * slice_len;
+                let end = start + chunk.len();
+                for (chunk, offset) in chunk.iter_mut().zip((start..end).map(|i| i * size)) {
+                    let mut r = e.clone();
+                    for i in offset..(offset + size) {
+                        r = f(r, array.linear_index(i));
+                    }
+                    *chunk = r;
+                }
+            });
+            thread_guards.push(g);
+        }
+    }
+    UArray {
+        shape: shape.clone(),
+        elems: elems
+    }
+}
+
 pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
     where S: Source {
     let size = array.extent().size();
@@ -389,7 +422,7 @@ pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Eleme
     {
         let len = elems.len();
         let slices = os::num_cpus();
-        let slice_len = len / slices;
+        let slice_len = (len + slices - 1) / slices;
         //Save the join guards so that they are 
         let mut results = Vec::new();
         for (i, chunk) in elems.chunks_mut(slice_len).enumerate() {
@@ -485,5 +518,12 @@ mod tests {
         let m2 = fold_s(|l, r| l + r, 0, &m);
         assert_eq!(m2.index(&Cons(Z, 0)), 1);
         assert_eq!(m2.index(&Cons(Z, 1)), 5);
+    }
+
+    #[test]
+    fn fold_parallel() {
+        let m = from_function(Cons(Z, 10000), |i| Cons(Z, 10000).to_index(i));
+        let m2 = fold_p(|l, r| l + r, 0, &m);
+        assert_eq!(m2.index(&Z), (9999 + 0) * 10000 / 2);
     }
 }
