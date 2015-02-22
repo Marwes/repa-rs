@@ -1,3 +1,4 @@
+#![feature(core, unboxed_closures)]
 use std::iter::IntoIterator;
 
 #[derive(Clone)]
@@ -106,35 +107,58 @@ impl <E: Copy, S: Shape> Source for UArray<S, E> {
     }
 }
 
-pub struct DArray<A, F> {
-    array: A,
+pub struct DArray<S, F>
+    where S: Shape
+        , F: for<'a> Fn<(&'a S,)> {
+    shape: S,
     f: F
 }
 
-impl <A, F, E> Source for DArray<A, F>
-    where A: Source
-        , F: Fn(<A as Source>::Element) -> E {
+impl <S, F, E> Source for DArray<S, F>
+    where S: Shape
+        , F: for<'a> Fn(&'a S) -> E {
     type Element = E;
-    type Sh = <A as Source>::Sh;
+    type Sh = S;
 
     fn extent(&self) -> &<Self as Source>::Sh {
-        self.array.extent()
+        &self.shape
     }
     fn index(&self, index: &<Self as Source>::Sh) -> E {
-        let e = self.array.index(index);
-        (self.f)(e)
+        (self.f)(index)
     }
     fn linear_index(&self, index: usize) -> E {
-        let e = self.array.linear_index(index);
+        (self.f)(&self.shape.from_index(index))
+    }
+}
+
+pub fn from_function<S, F, B>(shape: S, f: F) -> DArray<S, F>
+    where F: Fn(&S) -> B, S: Shape {
+    DArray {
+        shape: shape,
+        f: f
+    }
+}
+
+pub struct MapFn<S, F> {
+    source: S,
+    f: F
+}
+
+impl <'a, S, A, B, F> Fn<(&'a <S as Source>::Sh,)> for MapFn<S, F>
+    where F: Fn(A) -> B
+        , S: Source<Element=A> {
+    type Output = B;
+    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
+        let e = self.source.index(sh);
         (self.f)(e)
     }
 }
 
-pub fn map<S, F, B>(f: F, array: &S) -> DArray<&S, F>
+pub fn map<S, F, B>(f: F, array: &S) -> DArray<<S as Source>::Sh, MapFn<&S, F>>
     where F: Fn(<S as Source>::Element) -> B, S: Source {
     DArray {
-        array: array,
-        f: f
+        shape: array.extent().clone(),
+        f: MapFn { source: array, f: f }
     }
 }
 
@@ -154,20 +178,28 @@ pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Eleme
 #[cfg(test)]
 mod tests {
     use super::*;
+    
+    
+    const SHAPE2X2: Cons<Cons<Z>> = Cons(Cons(Z, 2), 2);
 
     #[test]
     fn index() {
-        let shape = Cons(Cons(Z, 2), 2);
         let i_0_0 = Cons(Cons(Z, 0), 0);
-        assert_eq!(shape.to_index(&i_0_0), 0);
+        assert_eq!(SHAPE2X2.to_index(&i_0_0), 0);
+    }
+    
+    #[test]
+    fn function() {
+        let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
+        assert_eq!(m.linear_index(3), 3);
+        assert_eq!(m.index(&SHAPE2X2.from_index(3)), 3);
     }
 
     #[test]
     fn array_index() {
-        let d2 = Cons(Cons(Z, 2), 2);
         let matrix = vec![1, 2
                         , 3, 4];
-        let array = UArray::from_iter(d2, matrix);
+        let array = UArray::from_iter(SHAPE2X2, matrix);
         assert_eq!(array.index(&Cons(Cons(Z, 0), 0)), 1);
         let delayed = map(|x| x * 2, &array);
         assert_eq!(delayed.index(&Cons(Cons(Z, 0), 0)), 2);
