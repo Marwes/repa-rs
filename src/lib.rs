@@ -20,6 +20,7 @@ pub trait Shape: Clone + Sync {
     fn size(&self) -> usize;
     fn to_index(&self, other: &Self) -> usize;
     fn from_index(&self, other: usize) -> Self;
+    fn check_bounds(&self, index: &Self) -> bool;
 }
 impl Shape for Z {
     #[inline]
@@ -38,6 +39,8 @@ impl Shape for Z {
     fn to_index(&self, _: &Z) -> usize { 0 }
     #[inline]
     fn from_index(&self, _: usize) -> Z { Z }
+    #[inline]
+    fn check_bounds(&self, _index: &Z) -> bool { true }
 }
 impl <T: Shape> Shape for Cons<T> {
     #[inline]
@@ -65,8 +68,9 @@ impl <T: Shape> Shape for Cons<T> {
         let r = if self.0.rank() == 0 { i } else { i % self.1 };
         Cons(self.0.from_index(i / self.1) , r)
     }
+    #[inline]
+    fn check_bounds(&self, index: &Cons<T>) -> bool { index.1 < self.1 && self.0.check_bounds(&index.0) }
 }
-
 
 pub trait Source: Sync {
     type Element: Send + Sync;
@@ -178,19 +182,6 @@ impl <E: Clone + Send + Sync, S: Shape> Source for UArray<S, E> {
     }
 }
 
-trait UnsafeFn<Args> {
-    type Output;
-    unsafe fn unsafe_call(&self, args: Args) -> <Self as UnsafeFn<Args>>::Output { self.safe_call(args) }
-    fn safe_call(&self, args: Args) -> <Self as UnsafeFn<Args>>::Output;
-}
-impl <F, Args> UnsafeFn<Args> for F
-    where F: Fn<Args> {
-    type Output = <F as Fn<Args>>::Output;
-    fn safe_call(&self, args: Args) -> <Self as UnsafeFn<Args>>::Output {
-        self.call(args)
-    }
-}
-
 pub struct DArray<S, F>
     where S: Shape {
     shape: S,
@@ -199,7 +190,7 @@ pub struct DArray<S, F>
 
 impl <S, F, E: Send + Sync> Source for DArray<S, F>
     where S: Shape
-        , F: for<'a> UnsafeFn(&'a S) -> E + Sync {
+        , F: for<'a> Fn(&'a S) -> E + Sync {
     type Element = E;
     type Sh = S;
 
@@ -207,13 +198,16 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
         &self.shape
     }
     fn index(&self, index: &<Self as Source>::Sh) -> E {
-        self.f.safe_call((index,))
+        if !self.extent().check_bounds(index) {
+            panic!("Array out of bounds")
+        }
+        (self.f)(index)
     }
     fn linear_index(&self, index: usize) -> E {
         self.index(&self.shape.from_index(index))
     }
     unsafe fn unsafe_index(&self, index: &<Self as Source>::Sh) -> E {
-        self.f.unsafe_call((index,))
+        (self.f)(index)
     }
     unsafe fn unsafe_linear_index(&self, index: usize) -> E {
         self.unsafe_index(&self.shape.from_index(index))
@@ -233,17 +227,13 @@ pub struct MapFn<S, F> {
     f: F
 }
 
-impl <'a, S, A, B, F> UnsafeFn<(&'a <S as Source>::Sh,)> for MapFn<S, F>
+impl <'a, S, A, B, F> Fn<(&'a <S as Source>::Sh,)> for MapFn<S, F>
     where A: Send + Sync
         , F: Fn(A) -> B
         , S: Source<Element=A> {
     type Output = B;
-    unsafe fn unsafe_call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
-        let e = self.source.unsafe_index(sh);
-        (self.f)(e)
-    }
-    fn safe_call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
-        let e = self.source.index(sh);
+    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
+        let e = unsafe { self.source.unsafe_index(sh) };
         (self.f)(e)
     }
 }
@@ -262,16 +252,12 @@ pub struct ExtractFn<S>
     start: <S as Source>::Sh,
 }
 
-impl <'a, S> UnsafeFn<(&'a <S as Source>::Sh,)> for ExtractFn<S>
+impl <'a, S> Fn<(&'a <S as Source>::Sh,)> for ExtractFn<S>
     where S: Source {
     type Output = <S as Source>::Element;
-    unsafe fn unsafe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
         let i = self.start.add_dim(sh);
-        self.source.unsafe_index(&i)
-    }
-    fn safe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
-        let i = self.start.add_dim(sh);
-        self.source.index(&i)
+        unsafe { self.source.unsafe_index(&i) }
     }
 }
 
@@ -288,17 +274,13 @@ pub struct TransposeFn<S>
     source: S
 }
 
-impl <'a, S, Sh> UnsafeFn<(&'a <S as Source>::Sh,)> for TransposeFn<S>
+impl <'a, S, Sh> Fn<(&'a <S as Source>::Sh,)> for TransposeFn<S>
     where S: Source<Sh=Cons<Cons<Sh>>>
         , Sh: Shape {
     type Output = <S as Source>::Element;
-    unsafe fn unsafe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
         let &Cons(Cons(ref rest, x), y) = sh;
-        self.source.unsafe_index(&Cons(Cons(rest.clone(), y), x))
-    }
-    fn safe_call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
-        let &Cons(Cons(ref rest, x), y) = sh;
-        self.source.index(&Cons(Cons(rest.clone(), y), x))
+        unsafe { self.source.unsafe_index(&Cons(Cons(rest.clone(), y), x)) }
     }
 }
 
@@ -319,21 +301,18 @@ pub struct ZipWithFn<S1, S2, F>
     f: F
 }
 
-impl <'a, S1, S2, Sh, F, O> UnsafeFn<(&'a <S1 as Source>::Sh,)> for ZipWithFn<S1, S2, F>
+impl <'a, S1, S2, Sh, F, O> Fn<(&'a <S1 as Source>::Sh,)> for ZipWithFn<S1, S2, F>
     where Sh: Shape
         , S1: Source<Sh=Sh>
         , S2: Source<Sh=Sh>
         , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
     type Output = O;
-    unsafe fn unsafe_call(&self, (sh,): (&Sh,)) -> O {
-        let l = self.lhs.unsafe_index(sh);
-        let r = self.rhs.unsafe_index(sh);
-        (self.f)(l, r)
-    }
-    fn safe_call(&self, (sh,): (&Sh,)) -> O {
-        let l = self.lhs.index(sh);
-        let r = self.rhs.index(sh);
-        (self.f)(l, r)
+    extern "rust-call" fn call(&self, (sh,): (&Sh,)) -> O {
+        unsafe {
+            let l = self.lhs.unsafe_index(sh);
+            let r = self.rhs.unsafe_index(sh);
+            (self.f)(l, r)
+        }
     }
 }
 
