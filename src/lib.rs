@@ -356,7 +356,7 @@ impl <'a, S, Sh, T, B> Fn<(&'a Sh,)> for TraverseFn<S, T>
     }
 }
 
-pub fn travserse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DArray<Sh, TraverseFn<S, T>>
+pub fn traverse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DArray<Sh, TraverseFn<S, T>>
     where S: Source
         , Sh: Shape
         , F: FnOnce(&<S as Source>::Shape) -> Sh
