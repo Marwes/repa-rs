@@ -4,12 +4,13 @@ use std::iter::IntoIterator;
 use std::default::Default;
 use std::thread;
 use std::os;
+use std::cmp::PartialEq;
 use std::ops::Deref;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Z;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Cons<T>(T, usize);
 
 pub trait Shape: Clone + Sync {
@@ -196,6 +197,21 @@ impl <E, S, V> Source for UArray<S, V>
     }
 }
 
+impl <E, O, S, V> PartialEq<O> for UArray<S, V>
+    where O: Source<Shape=S, Element=E>
+        , S: Shape + PartialEq
+        , V: Deref<Target=[E]> + Send + Sync
+        , E: Clone + Send + Sync + PartialEq {
+    fn eq(&self, other: &O) -> bool {
+        if self.extent() != other.extent() {
+            false
+        }
+        else {
+            iter(self).zip(iter(other)).all(|(l, r)| l == r)
+        }
+    }
+}
+
 pub struct DArray<S, F>
     where S: Shape {
     shape: S,
@@ -225,6 +241,21 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
     }
     unsafe fn unsafe_linear_index(&self, index: usize) -> E {
         self.unsafe_index(&self.shape.from_index(index))
+    }
+}
+
+impl <E, O, S, F> PartialEq<O> for DArray<S, F>
+    where O: Source<Shape=S, Element=E>
+        , S: Shape + PartialEq
+        , F: Fn(&S) -> E + Sync
+        , E: Clone + Send + Sync + PartialEq {
+    fn eq(&self, other: &O) -> bool {
+        if self.extent() != other.extent() {
+            false
+        }
+        else {
+            iter(self).zip(iter(other)).all(|(l, r)| l == r)
+        }
     }
 }
 
