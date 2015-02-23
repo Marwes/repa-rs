@@ -462,25 +462,16 @@ pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> U
     let &Cons(ref shape, size) = array.extent();
     let new_size = shape.size();
     let mut elems = vec![e.clone(); new_size];
-    {
-        let mut thread_guards = Vec::new();
-        let slices = os::num_cpus();
-        let slice_len = (new_size + slices - 1) / slices;
-        for (i, chunk) in elems.chunks_mut(slice_len).enumerate() {
-            let g = thread::scoped(move || {
-                let start = i * slice_len;
-                let end = start + chunk.len();
-                for (chunk, offset) in chunk.iter_mut().zip((start..end).map(|i| i * size)) {
-                    let mut r = e.clone();
-                    for i in offset..(offset + size) {
-                        r = f(r, array.linear_index(i));
-                    }
-                    *chunk = r;
-                }
-            });
-            thread_guards.push(g);
+    parallel_chunks(&mut elems, |chunk, start| {
+        let end = start + chunk.len();
+        for (chunk, offset) in chunk.iter_mut().zip((start..end).map(|i| i * size)) {
+            let mut r = e.clone();
+            for i in offset..(offset + size) {
+                r = f(r, array.linear_index(i));
+            }
+            *chunk = r;
         }
-    }
+    });
     UArray {
         shape: shape.clone(),
         elems: elems
@@ -507,28 +498,29 @@ pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Shape, Vec<<S as Source>
     let extent = array.extent();
     let size = extent.size();
     let mut elems = vec![Default::default(); size];
-    {
-        let len = elems.len();
-        let slices = os::num_cpus();
-        let slice_len = (len + slices - 1) / slices;
-        //Save the join guards so that they are 
-        let mut results = Vec::new();
-        for (i, chunk) in elems.chunks_mut(slice_len).enumerate() {
-            let offset = i * slice_len;
-            let x = thread::scoped(move || {
-                for (j, e) in chunk.iter_mut().enumerate() {
-                    *e = array.linear_index(offset + j);
-                }
-            });
-            results.push(x);
+    parallel_chunks(&mut elems, |chunk, offset| {
+        for (j, e) in chunk.iter_mut().enumerate() {
+            *e = array.linear_index(offset + j);
         }
-        for r in results {
-            r.join();
-        }
-    }
+    });
     UArray {
         shape: extent.clone(),
         elems: elems
+    }
+}
+
+fn parallel_chunks<E, F>(elems: &mut [E], ref f: F)
+    where E: Send + Sync
+        , F: Fn(&mut [E], usize) + Sync {
+    let len = elems.len();
+    let slices = os::num_cpus();
+    let slice_len = (len + slices - 1) / slices;
+    //Save the join guards so that they are 
+    let mut results = Vec::new();
+    for (i, chunk) in elems.chunks_mut(slice_len).enumerate() {
+        let offset = i * slice_len;
+        let x = thread::scoped(move || f(chunk, offset));
+        results.push(x);
     }
 }
 
