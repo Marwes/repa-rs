@@ -147,25 +147,38 @@ impl <'a, S> Source for &'a S
 
 struct Iter<S> {
     index: usize,
+    end: usize,
     source: S
 }
 impl <S> Iterator for Iter<S>
     where S: Source {
     type Item = <S as Source>::Element;
     fn next(&mut self) -> Option<<S as Source>::Element> {
-        if self.index < self.source.extent().size() {
+        if self.index < self.end {
             let i = self.index;
             self.index += 1;
-            Some(self.source.linear_index(i))
+            Some(unsafe { self.source.unsafe_linear_index(i) })
         }
         else {
             None
         }
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.end - self.index, Some(self.end - self.index))
+    }
 }
+
 fn iter<S>(s: &S) -> Iter<&S>
     where S: Source {
-    Iter { index: 0, source: s }
+    range_iter(s, 0, s.extent().size())
+}
+
+fn range_iter<S>(s: &S, start: usize, end: usize) -> Iter<&S>
+    where S: Source {
+    assert!(start <= end);
+    assert!(end <= s.extent().size());
+    Iter { index: start, end: end, source: s }
 }
 
 struct Fmt<S>(S);
@@ -443,8 +456,8 @@ pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArra
     let mut elems = Vec::with_capacity(new_size);
     for offset in (0..new_size).map(|i| i * size) {
         let mut r = e.clone();
-        for i in offset..(offset + size) {
-            r = f(r, array.linear_index(i));
+        for e in range_iter(array, offset, offset + size) {
+            r = f(r, e);
         }
         elems.push(r);
     }
@@ -466,8 +479,8 @@ pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> U
         let end = start + chunk.len();
         for (chunk, offset) in chunk.iter_mut().zip((start..end).map(|i| i * size)) {
             let mut r = e.clone();
-            for i in offset..(offset + size) {
-                r = f(r, array.linear_index(i));
+            for e in range_iter(array, offset, (offset + size)) {
+                r = f(r, e);
             }
             *chunk = r;
         }
@@ -480,15 +493,9 @@ pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> U
 
 pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Shape, Vec<<S as Source>::Element>>
     where S: Source {
-    let extent = array.extent();
-    let size = extent.size();
-    let mut elems = Vec::with_capacity(size);
-    for i in 0..size {
-        elems.push(array.linear_index(i));
-    }
     UArray {
-        shape: extent.clone(),
-        elems: elems
+        shape: array.extent().clone(),
+        elems: iter(array).collect()
     }
 }
 
@@ -499,8 +506,9 @@ pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Shape, Vec<<S as Source>
     let size = extent.size();
     let mut elems = vec![Default::default(); size];
     parallel_chunks(&mut elems, |chunk, offset| {
-        for (j, e) in chunk.iter_mut().enumerate() {
-            *e = array.linear_index(offset + j);
+        let len = chunk.len();
+        for (r, e) in chunk.iter_mut().zip(range_iter(array, offset, offset + len)) {
+            *r = e;
         }
     });
     UArray {
