@@ -1,4 +1,6 @@
 #![feature(core, os, unboxed_closures)]
+#![cfg_attr(test, feature(plugin))]
+#![cfg_attr(test, plugin(quickcheck_macros))]
 use std::fmt;
 use std::iter::IntoIterator;
 use std::default::Default;
@@ -6,6 +8,9 @@ use std::thread;
 use std::os;
 use std::cmp::PartialEq;
 use std::ops::Deref;
+
+#[cfg(test)]
+extern crate quickcheck;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Z;
@@ -530,6 +535,7 @@ pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Shape, Vec<<S as Source>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quickcheck::TestResult;
     
     
     const SHAPE2X2: Cons<Cons<Z>> = Cons(Cons(Z, 2), 2);
@@ -576,16 +582,6 @@ mod tests {
     }
 
     #[test]
-    fn transpose_test() {
-        let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
-        let m2 = transpose(&m);
-        let i0x1 = Cons(Cons(Z, 0), 1);
-        let i1x0 = Cons(Cons(Z, 1), 0);
-        assert_eq!(m.index(&i0x1), m2.index(&i1x0));
-        assert_eq!(m.index(&i1x0), m2.index(&i0x1));
-    }
-
-    #[test]
     fn zip_with_test() {
         let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
         let m2 = zip_with(&m, &m, |l, r| l + r);
@@ -609,4 +605,22 @@ mod tests {
         let m2 = fold_p(|l, r| l + r, 0, &m);
         assert_eq!(m2.index(&Z), (9999 + 0) * 10000 / 2);
     }
+
+    #[quickcheck]
+    fn to_index_from_index(s: (usize, usize, usize), i: (usize, usize, usize)) -> TestResult {
+        let shape = Cons(Cons(Cons(Z, s.0), s.1), s.2);
+        let index = Cons(Cons(Cons(Z, i.0), i.1), i.2);
+        if !shape.check_bounds(&index) {
+            return TestResult::discard();
+        }
+        TestResult::from_bool(shape.from_index(shape.to_index(&index)) == index)
+    }
+
+    #[quickcheck]
+    fn transpose_test(vs: Vec<i32>) -> bool {
+        let size = ::std::num::Float::sqrt(vs.len() as f64) as usize;
+        let m = UArray::new(Cons(Cons(Z, size), size), vs);
+        transpose(transpose(&m)) == m
+    }
+
 }
