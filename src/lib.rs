@@ -87,6 +87,17 @@ impl <T: Shape> Shape for Cons<T> {
     }
 }
 
+impl fmt::Display for Z {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "Z") }
+}
+
+impl <S> fmt::Display for Cons<S>
+    where S: fmt::Display {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} :. {}", self.0, self.1)
+    }
+}
+
 pub trait Source: Sync {
     type Element: Send + Sync;
     type Shape: Shape;
