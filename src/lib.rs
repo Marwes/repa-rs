@@ -4,6 +4,7 @@ use std::iter::IntoIterator;
 use std::default::Default;
 use std::thread;
 use std::os;
+use std::ops::Deref;
 
 #[derive(Clone, Debug)]
 pub struct Z;
@@ -150,24 +151,37 @@ impl <S> fmt::Display for Fmt<S>
     }
 }
 
-pub struct UArray<S, E> {
+pub struct UArray<S, V>
+    where S: Shape
+        , V: Send + Sync {
     shape: S,
-    elems: Vec<E>
+    elems: V
 }
 
-impl <S: Shape, E: Clone> UArray<S, E> {
-    pub fn new(shape: S, e: E) -> UArray<S, E> {
-        let size = shape.size();
-        let elems = vec![e; size];
+impl <E, S, V> UArray<S, V>
+    where S: Shape
+        , E: Clone + Send + Sync
+        , V: Deref<Target=[E]> + Send + Sync {
+
+    pub fn new(shape: S, elems: V) -> UArray<S, V> {
         UArray { shape: shape, elems: elems }
     }
-    pub fn from_iter<I>(shape: S, iter: I) -> UArray<S, E>
+}
+
+impl <E, S> UArray<S, Vec<E>>
+    where S: Shape
+        , E: Clone + Send + Sync {
+
+    pub fn from_iter<I>(shape: S, iter: I) -> UArray<S, Vec<E>>
         where I: IntoIterator<Item=E> {
         UArray { shape: shape, elems: iter.into_iter().collect() }
     }
 }
 
-impl <E: Clone + Send + Sync, S: Shape> Source for UArray<S, E> {
+impl <E, S, V> Source for UArray<S, V>
+    where S: Shape
+        , E: Clone + Send + Sync
+        , V: Deref<Target=[E]> + Send + Sync {
     type Element = E;
     type Sh = S;
 
@@ -356,7 +370,7 @@ pub fn travserse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DAr
 }
 
 
-pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArray<Sh, <S as Source>::Element>
+pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArray<Sh, Vec<<S as Source>::Element>>
     where Sh: Shape
         , S: Source<Sh=Cons<Sh>>
         , F: FnMut(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element
@@ -377,7 +391,7 @@ pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArra
     }
 }
 
-pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> UArray<Sh, <S as Source>::Element>
+pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> UArray<Sh, Vec<<S as Source>::Element>>
     where Sh: Shape
         , S: Source<Sh=Cons<Sh>>
         , F: Fn(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element + Sync
@@ -410,7 +424,7 @@ pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> U
     }
 }
 
-pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
+pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, Vec<<S as Source>::Element>>
     where S: Source {
     let extent = array.extent();
     let size = extent.size();
@@ -424,7 +438,7 @@ pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Eleme
     }
 }
 
-pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Sh, <S as Source>::Element>
+pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Sh, Vec<<S as Source>::Element>>
     where S: Source
         , <S as Source>::Element: Default + Clone {
     let extent = array.extent();
@@ -479,7 +493,7 @@ mod tests {
     fn array_index() {
         let matrix = vec![1, 2
                         , 3, 4];
-        let array = UArray::from_iter(SHAPE2X2, matrix);
+        let array = UArray::new(SHAPE2X2, matrix);
         assert_eq!(array.index(&Cons(Cons(Z, 0), 0)), 1);
         let delayed = map(|x| x * 2, &array);
         assert_eq!(delayed.index(&Cons(Cons(Z, 0), 0)), 2);
