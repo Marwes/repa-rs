@@ -377,8 +377,9 @@ impl <'a, S, Sh> Fn<(&'a <S as Source>::Shape,)> for TransposeFn<S>
 pub fn transpose<S, Sh>(array: S) -> DArray<<S as Source>::Shape, TransposeFn<S>>
     where S: Source<Shape=Cons<Cons<Sh>>>
         , Sh: Shape {
+    let Cons(Cons(rest, x), y) = array.extent().clone();
     DArray {
-        shape: array.extent().clone(),
+        shape: Cons(Cons(rest, y), x),
         f: TransposeFn { source: array }
     }
 }
@@ -617,9 +618,10 @@ mod tests {
     }
 
     #[quickcheck]
-    fn transpose_test(vs: Vec<i32>) -> bool {
-        let size = ::std::num::Float::sqrt(vs.len() as f64) as usize;
-        let m = UArray::new(Cons(Cons(Z, size), size), vs);
+    fn transpose_test(vs: Vec<i32>, size: usize) -> bool {
+        //size is the length of one side of the 2 dimensional matrix
+        let size = if vs.len() / 2 == 0 { 0 } else { size % (vs.len() / 2) };
+        let m = UArray::new(Cons(Cons(Z, size), vs.len() / 2), vs);
         transpose(transpose(&m)) == m
     }
 
