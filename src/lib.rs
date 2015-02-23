@@ -23,6 +23,8 @@ pub trait Shape: Clone + Sync {
     fn to_index(&self, other: &Self) -> usize;
     fn from_index(&self, other: usize) -> Self;
     fn check_bounds(&self, index: &Self) -> bool;
+    fn map<F>(&self, f: F) -> Self
+        where F: FnMut(usize) -> usize;
 }
 impl Shape for Z {
     #[inline]
@@ -43,6 +45,11 @@ impl Shape for Z {
     fn from_index(&self, _: usize) -> Z { Z }
     #[inline]
     fn check_bounds(&self, _index: &Z) -> bool { true }
+    #[inline]
+    fn map<F>(&self, _: F) -> Z
+        where F: FnMut(usize) -> usize {
+        Z
+    }
 }
 impl <T: Shape> Shape for Cons<T> {
     #[inline]
@@ -72,6 +79,12 @@ impl <T: Shape> Shape for Cons<T> {
     }
     #[inline]
     fn check_bounds(&self, index: &Cons<T>) -> bool { index.1 < self.1 && self.0.check_bounds(&index.0) }
+    #[inline]
+    fn map<F>(&self, mut f: F) -> Cons<T>
+        where F: FnMut(usize) -> usize {
+        let i = f(self.1);
+        Cons(self.0.map(f), i)
+    }
 }
 
 pub trait Source: Sync {
@@ -308,6 +321,9 @@ impl <'a, S> Fn<(&'a <S as Source>::Shape,)> for ExtractFn<S>
 
 pub fn extract<S>(start: <S as Source>::Shape, size: <S as Source>::Shape, array: S) -> DArray<<S as Source>::Shape, ExtractFn<S>>
     where S: Source {
+    if !array.extent().map(|i| i + 1).check_bounds(&start.add_dim(&size)) {
+        panic!("extract: out of bounds")
+    }
     DArray {
         shape: size,
         f: ExtractFn { source: array, start: start }
