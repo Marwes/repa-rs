@@ -75,16 +75,16 @@ impl <T: Shape> Shape for Cons<T> {
 
 pub trait Source: Sync {
     type Element: Send + Sync;
-    type Sh: Shape;
+    type Shape: Shape;
 
-    fn extent(&self) -> &<Self as Source>::Sh;
+    fn extent(&self) -> &<Self as Source>::Shape;
     fn linear_index(&self, index: usize) -> <Self as Source>::Element;
 
-    fn index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element {
+    fn index(&self, index: &<Self as Source>::Shape) -> <Self as Source>::Element {
         self.linear_index(self.extent().to_index(index))
     }
 
-    unsafe fn unsafe_index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element {
+    unsafe fn unsafe_index(&self, index: &<Self as Source>::Shape) -> <Self as Source>::Element {
         self.unsafe_linear_index(self.extent().to_index(index))
     }
     unsafe fn unsafe_linear_index(&self, index: usize) -> <Self as Source>::Element {
@@ -95,18 +95,18 @@ pub trait Source: Sync {
 impl <'a, S> Source for &'a S
     where S: Source {
     type Element = <S as Source>::Element;
-    type Sh = <S as Source>::Sh;
+    type Shape = <S as Source>::Shape;
 
-    fn extent(&self) -> &<Self as Source>::Sh {
+    fn extent(&self) -> &<Self as Source>::Shape {
         (**self).extent()
     }
-    fn index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element {
+    fn index(&self, index: &<Self as Source>::Shape) -> <Self as Source>::Element {
         (**self).index(index)
     }
     fn linear_index(&self, index: usize) -> <Self as Source>::Element {
         (**self).linear_index(index)
     }
-    unsafe fn unsafe_index(&self, index: &<Self as Source>::Sh) -> <Self as Source>::Element {
+    unsafe fn unsafe_index(&self, index: &<Self as Source>::Shape) -> <Self as Source>::Element {
         (**self).unsafe_index(index)
     }
     unsafe fn unsafe_linear_index(&self, index: usize) -> <Self as Source>::Element {
@@ -183,7 +183,7 @@ impl <E, S, V> Source for UArray<S, V>
         , E: Clone + Send + Sync
         , V: Deref<Target=[E]> + Send + Sync {
     type Element = E;
-    type Sh = S;
+    type Shape = S;
 
     fn extent(&self) -> &S {
         &self.shape
@@ -206,12 +206,12 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
     where S: Shape
         , F: for<'a> Fn(&'a S) -> E + Sync {
     type Element = E;
-    type Sh = S;
+    type Shape = S;
 
-    fn extent(&self) -> &<Self as Source>::Sh {
+    fn extent(&self) -> &<Self as Source>::Shape {
         &self.shape
     }
-    fn index(&self, index: &<Self as Source>::Sh) -> E {
+    fn index(&self, index: &<Self as Source>::Shape) -> E {
         if !self.extent().check_bounds(index) {
             panic!("Array out of bounds")
         }
@@ -220,7 +220,7 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
     fn linear_index(&self, index: usize) -> E {
         self.index(&self.shape.from_index(index))
     }
-    unsafe fn unsafe_index(&self, index: &<Self as Source>::Sh) -> E {
+    unsafe fn unsafe_index(&self, index: &<Self as Source>::Shape) -> E {
         (self.f)(index)
     }
     unsafe fn unsafe_linear_index(&self, index: usize) -> E {
@@ -241,18 +241,18 @@ pub struct MapFn<S, F> {
     f: F
 }
 
-impl <'a, S, A, B, F> Fn<(&'a <S as Source>::Sh,)> for MapFn<S, F>
+impl <'a, S, A, B, F> Fn<(&'a <S as Source>::Shape,)> for MapFn<S, F>
     where A: Send + Sync
         , F: Fn(A) -> B
         , S: Source<Element=A> {
     type Output = B;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> B {
+    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Shape,)) -> B {
         let e = unsafe { self.source.unsafe_index(sh) };
         (self.f)(e)
     }
 }
 
-pub fn map<S, F, B>(f: F, array: S) -> DArray<<S as Source>::Sh, MapFn<S, F>>
+pub fn map<S, F, B>(f: F, array: S) -> DArray<<S as Source>::Shape, MapFn<S, F>>
     where F: Fn(<S as Source>::Element) -> B, S: Source {
     DArray {
         shape: array.extent().clone(),
@@ -263,19 +263,19 @@ pub fn map<S, F, B>(f: F, array: S) -> DArray<<S as Source>::Sh, MapFn<S, F>>
 pub struct ExtractFn<S>
     where S: Source {
     source: S,
-    start: <S as Source>::Sh,
+    start: <S as Source>::Shape,
 }
 
-impl <'a, S> Fn<(&'a <S as Source>::Sh,)> for ExtractFn<S>
+impl <'a, S> Fn<(&'a <S as Source>::Shape,)> for ExtractFn<S>
     where S: Source {
     type Output = <S as Source>::Element;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Shape,)) -> <S as Source>::Element {
         let i = self.start.add_dim(sh);
         unsafe { self.source.unsafe_index(&i) }
     }
 }
 
-pub fn extract<S>(start: <S as Source>::Sh, size: <S as Source>::Sh, array: S) -> DArray<<S as Source>::Sh, ExtractFn<S>>
+pub fn extract<S>(start: <S as Source>::Shape, size: <S as Source>::Shape, array: S) -> DArray<<S as Source>::Shape, ExtractFn<S>>
     where S: Source {
     DArray {
         shape: size,
@@ -288,18 +288,18 @@ pub struct TransposeFn<S>
     source: S
 }
 
-impl <'a, S, Sh> Fn<(&'a <S as Source>::Sh,)> for TransposeFn<S>
-    where S: Source<Sh=Cons<Cons<Sh>>>
+impl <'a, S, Sh> Fn<(&'a <S as Source>::Shape,)> for TransposeFn<S>
+    where S: Source<Shape=Cons<Cons<Sh>>>
         , Sh: Shape {
     type Output = <S as Source>::Element;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Sh,)) -> <S as Source>::Element {
+    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Shape,)) -> <S as Source>::Element {
         let &Cons(Cons(ref rest, x), y) = sh;
         unsafe { self.source.unsafe_index(&Cons(Cons(rest.clone(), y), x)) }
     }
 }
 
-pub fn transpose<S, Sh>(array: S) -> DArray<<S as Source>::Sh, TransposeFn<S>>
-    where S: Source<Sh=Cons<Cons<Sh>>>
+pub fn transpose<S, Sh>(array: S) -> DArray<<S as Source>::Shape, TransposeFn<S>>
+    where S: Source<Shape=Cons<Cons<Sh>>>
         , Sh: Shape {
     DArray {
         shape: array.extent().clone(),
@@ -315,10 +315,10 @@ pub struct ZipWithFn<S1, S2, F>
     f: F
 }
 
-impl <'a, S1, S2, Sh, F, O> Fn<(&'a <S1 as Source>::Sh,)> for ZipWithFn<S1, S2, F>
+impl <'a, S1, S2, Sh, F, O> Fn<(&'a <S1 as Source>::Shape,)> for ZipWithFn<S1, S2, F>
     where Sh: Shape
-        , S1: Source<Sh=Sh>
-        , S2: Source<Sh=Sh>
+        , S1: Source<Shape=Sh>
+        , S2: Source<Shape=Sh>
         , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
     type Output = O;
     extern "rust-call" fn call(&self, (sh,): (&Sh,)) -> O {
@@ -330,9 +330,9 @@ impl <'a, S1, S2, Sh, F, O> Fn<(&'a <S1 as Source>::Sh,)> for ZipWithFn<S1, S2, 
     }
 }
 
-pub fn zip_with<S1, S2, F, O>(lhs: S1, rhs: S2, f: F) -> DArray<<S1 as Source>::Sh, ZipWithFn<S1, S2, F>>
+pub fn zip_with<S1, S2, F, O>(lhs: S1, rhs: S2, f: F) -> DArray<<S1 as Source>::Shape, ZipWithFn<S1, S2, F>>
     where S1: Source
-        , S2: Source<Sh=<S1 as Source>::Sh>
+        , S2: Source<Shape=<S1 as Source>::Shape>
         , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
     DArray {
         shape: lhs.extent().intersect_dim(rhs.extent()),
@@ -359,7 +359,7 @@ impl <'a, S, Sh, T, B> Fn<(&'a Sh,)> for TraverseFn<S, T>
 pub fn travserse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DArray<Sh, TraverseFn<S, T>>
     where S: Source
         , Sh: Shape
-        , F: FnOnce(&<S as Source>::Sh) -> Sh
+        , F: FnOnce(&<S as Source>::Shape) -> Sh
         , T: Fn(&S, &Sh) -> B {
 
     let shape = new_shape(array.extent());
@@ -372,7 +372,7 @@ pub fn travserse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DAr
 
 pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArray<Sh, Vec<<S as Source>::Element>>
     where Sh: Shape
-        , S: Source<Sh=Cons<Sh>>
+        , S: Source<Shape=Cons<Sh>>
         , F: FnMut(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element
         , <S as Source>::Element: Clone {
     let &Cons(ref shape, size) = array.extent();
@@ -393,7 +393,7 @@ pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArra
 
 pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> UArray<Sh, Vec<<S as Source>::Element>>
     where Sh: Shape
-        , S: Source<Sh=Cons<Sh>>
+        , S: Source<Shape=Cons<Sh>>
         , F: Fn(<S as Source>::Element, <S as Source>::Element) -> <S as Source>::Element + Sync
         , <S as Source>::Element: Clone {
     let &Cons(ref shape, size) = array.extent();
@@ -424,7 +424,7 @@ pub fn fold_p<F, S, Sh>(ref f: F, ref e: <S as Source>::Element, array: &S) -> U
     }
 }
 
-pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, Vec<<S as Source>::Element>>
+pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Shape, Vec<<S as Source>::Element>>
     where S: Source {
     let extent = array.extent();
     let size = extent.size();
@@ -438,7 +438,7 @@ pub fn compute_s<S>(array: &S) -> UArray<<S as Source>::Sh, Vec<<S as Source>::E
     }
 }
 
-pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Sh, Vec<<S as Source>::Element>>
+pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Shape, Vec<<S as Source>::Element>>
     where S: Source
         , <S as Source>::Element: Default + Clone {
     let extent = array.extent();
