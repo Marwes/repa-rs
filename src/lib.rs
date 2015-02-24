@@ -7,11 +7,13 @@ use std::os;
 
 use shape::{Cons, Shape};
 use source::{from_function, iter, range_iter, Source, DArray, UArray};
+use slice::Slice;
 
 #[cfg(test)]
 extern crate quickcheck;
 
 pub mod shape;
+pub mod slice;
 pub mod source;
 
 pub struct MapFn<S, F> {
@@ -136,6 +138,29 @@ pub fn traverse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DArr
     from_function(shape, TraverseFn { source: array, transform: transform })
 }
 
+pub struct SliceFn<A, S>
+    where A: Source
+        , S: Slice {
+    array: A,
+    slice: S
+}
+
+impl <'a, A, S> Fn<(&'a <S as Slice>::Slice,)> for SliceFn<A, S>
+    where S: Slice
+        , A: Source<Shape=<S as Slice>::Full> {
+    type Output = <A as Source>::Element;
+    extern "rust-call" fn call(&self, (sh,): (&<S as Slice>::Slice,)) -> <A as Source>::Element {
+        //Get the index in the full array
+        let full_index = self.slice.full_of_slice(sh.clone());
+        self.array.index(&full_index)
+    }
+}
+
+pub fn slice<A, S>(array: A, slice: S) -> DArray<<S as Slice>::Slice, SliceFn<A, S>>
+    where A: Source<Shape=<S as Slice>::Full>
+        , S: Slice {
+    from_function(slice.slice_of_full(array.extent().clone()), SliceFn { array: array, slice: slice })
+}
 
 pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArray<Sh, Vec<<S as Source>::Element>>
     where Sh: Shape
@@ -217,6 +242,7 @@ mod tests {
     use super::*;
     use shape::{Cons, Z, Shape};
     use source::{from_function, Source, UArray};
+    use slice::{All, any};
     
     
     const SHAPE2X2: Cons<Cons<Z>> = Cons(Cons(Z, 2), 2);
@@ -285,6 +311,25 @@ mod tests {
         let m = from_function(Cons(Z, 10000), |i| Cons(Z, 10000).to_index(i));
         let m2 = fold_p(|l, r| l + r, 0, &m);
         assert_eq!(m2.index(&Z), (9999 + 0) * 10000 / 2);
+    }
+
+    #[test]
+    fn slice_test() {
+        let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
+        let column0 = slice(&m, Cons(any(), 0));
+        assert_eq!(column0.index(&Cons(Z, 0)), 0);
+        assert_eq!(column0.index(&Cons(Z, 1)), 2);
+        let row1 = slice(&m, Cons(Cons(any(), 1), All));
+        assert_eq!(row1.index(&Cons(Z, 0)), 2);
+        assert_eq!(row1.index(&Cons(Z, 1)), 3);
+    }
+    
+    #[test]
+    #[should_fail]
+    fn slice_out_of_bounds() {
+        let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
+        let column0 = slice(&m, Cons(any(), 0));
+        column0.index(&Cons(Z, 2));
     }
 
     #[quickcheck]

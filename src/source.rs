@@ -160,7 +160,7 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
     }
     fn index(&self, index: &<Self as Source>::Shape) -> E {
         if !self.extent().check_bounds(index) {
-            panic!("Array out of bounds")
+            panic!("Array out of bounds: {:?} {:?}", self.extent().size(), index.size())
         }
         (self.f)(index)
     }

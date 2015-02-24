@@ -4,7 +4,7 @@ use std::fmt;
 pub struct Z;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Cons<T>(pub T, pub usize);
+pub struct Cons<T, U = usize>(pub T, pub U);
 
 pub trait Shape: Clone + Sync {
     fn rank(&self) -> usize;
