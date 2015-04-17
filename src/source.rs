@@ -1,7 +1,6 @@
 use std::cmp::PartialEq;
 use std::ops::Deref;
 use std::iter::IntoIterator;
-use std::fmt;
 
 use shape::Shape;
 
@@ -143,6 +142,21 @@ impl <E, O, S, V> PartialEq<O> for UArray<S, V>
     }
 }
 
+pub trait Select<Args> {
+    type Output;
+    fn select(&self, args: Args) -> Self::Output;
+}
+
+pub struct SelectFn<F>(F);
+
+impl <F, A> Select<A> for SelectFn<F>
+    where F: Fn<A> {
+    type Output = F::Output;
+    fn select(&self, args: A) -> Self::Output {
+        self.0.call(args)
+    }
+}
+
 pub struct DArray<S, F>
     where S: Shape {
     shape: S,
@@ -151,7 +165,7 @@ pub struct DArray<S, F>
 
 impl <S, F, E: Send + Sync> Source for DArray<S, F>
     where S: Shape
-        , F: for<'a> Fn(&'a S) -> E + Sync {
+        , F: for<'a> Select<(&'a S,), Output=E> + Sync {
     type Element = E;
     type Shape = S;
 
@@ -162,13 +176,13 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
         if !self.extent().check_bounds(index) {
             panic!("Array out of bounds: {:?} {:?}", self.extent().size(), index.size())
         }
-        (self.f)(index)
+        self.f.select((index,))
     }
     fn linear_index(&self, index: usize) -> E {
         self.index(&self.shape.from_index(index))
     }
     unsafe fn unsafe_index(&self, index: &<Self as Source>::Shape) -> E {
-        (self.f)(index)
+        self.f.select((index,))
     }
     unsafe fn unsafe_linear_index(&self, index: usize) -> E {
         self.unsafe_index(&self.shape.from_index(index))
@@ -178,7 +192,7 @@ impl <S, F, E: Send + Sync> Source for DArray<S, F>
 impl <E, O, S, F> PartialEq<O> for DArray<S, F>
     where O: Source<Shape=S, Element=E>
         , S: Shape + PartialEq
-        , F: Fn(&S) -> E + Sync
+        , F: for<'a> Select<(&'a S,), Output=E> + Sync
         , E: Clone + Send + Sync + PartialEq {
     fn eq(&self, other: &O) -> bool {
         if self.extent() != other.extent() {
@@ -190,8 +204,16 @@ impl <E, O, S, F> PartialEq<O> for DArray<S, F>
     }
 }
 
-pub fn from_function<S, F, B>(shape: S, f: F) -> DArray<S, F>
+pub fn from_function<S, F, B>(shape: S, f: F) -> DArray<S, SelectFn<F>>
     where F: Fn(&S) -> B, S: Shape {
+    DArray {
+        shape: shape,
+        f: SelectFn(f)
+    }
+}
+
+pub fn from_select<S, F, B>(shape: S, f: F) -> DArray<S, F>
+    where F: for<'a> Select<(&'a S,), Output=B>, S: Shape {
     DArray {
         shape: shape,
         f: f

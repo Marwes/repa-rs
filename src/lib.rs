@@ -1,13 +1,12 @@
-#![feature(collections, core, os, unboxed_closures, unsafe_destructor)]
+#![feature(custom_attribute, collections, core, unboxed_closures)]
 #![cfg_attr(test, feature(plugin))]
 #![cfg_attr(test, plugin(quickcheck_macros))]
 use std::marker::PhantomData;
 use std::default::Default;
 use std::thread;
-use std::os;
 
 use shape::{Cons, Shape};
-use source::{from_function, iter, range_iter, Source, DArray, UArray};
+use source::{from_select, iter, range_iter, Source, Select, DArray, UArray};
 use slice::Slice;
 
 #[cfg(test)]
@@ -22,12 +21,12 @@ pub struct MapFn<S, F> {
     f: F
 }
 
-impl <'a, S, A, B, F> Fn<(&'a <S as Source>::Shape,)> for MapFn<S, F>
+impl <'a, S, A, B, F> Select<(&'a <S as Source>::Shape,)> for MapFn<S, F>
     where A: Send + Sync
         , F: Fn(A) -> B
         , S: Source<Element=A> {
     type Output = B;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Shape,)) -> B {
+    fn select(&self, (sh,): (&<S as Source>::Shape,)) -> B {
         let e = unsafe { self.source.unsafe_index(sh) };
         (self.f)(e)
     }
@@ -35,7 +34,7 @@ impl <'a, S, A, B, F> Fn<(&'a <S as Source>::Shape,)> for MapFn<S, F>
 
 pub fn map<S, F, B>(f: F, array: S) -> DArray<<S as Source>::Shape, MapFn<S, F>>
     where F: Fn(<S as Source>::Element) -> B, S: Source {
-    from_function(array.extent().clone(), MapFn { source: array, f: f })
+    from_select(array.extent().clone(), MapFn { source: array, f: f })
 }
 
 pub struct ExtractFn<S>
@@ -44,10 +43,10 @@ pub struct ExtractFn<S>
     start: <S as Source>::Shape,
 }
 
-impl <'a, S> Fn<(&'a <S as Source>::Shape,)> for ExtractFn<S>
+impl <'a, S> Select<(&'a <S as Source>::Shape,)> for ExtractFn<S>
     where S: Source {
     type Output = <S as Source>::Element;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Shape,)) -> <S as Source>::Element {
+    fn select(&self, (sh,): (&<S as Source>::Shape,)) -> <S as Source>::Element {
         let i = self.start.add_dim(sh);
         unsafe { self.source.unsafe_index(&i) }
     }
@@ -58,7 +57,7 @@ pub fn extract<S>(start: <S as Source>::Shape, size: <S as Source>::Shape, array
     if !array.extent().map(|i| i + 1).check_bounds(&start.add_dim(&size)) {
         panic!("extract: out of bounds")
     }
-    from_function(size, ExtractFn { source: array, start: start })
+    from_select(size, ExtractFn { source: array, start: start })
 }
 
 pub struct TransposeFn<S>
@@ -66,11 +65,11 @@ pub struct TransposeFn<S>
     source: S
 }
 
-impl <'a, S, Sh> Fn<(&'a <S as Source>::Shape,)> for TransposeFn<S>
+impl <'a, S, Sh> Select<(&'a <S as Source>::Shape,)> for TransposeFn<S>
     where S: Source<Shape=Cons<Cons<Sh>>>
         , Sh: Shape {
     type Output = <S as Source>::Element;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Source>::Shape,)) -> <S as Source>::Element {
+    fn select(&self, (sh,): (&<S as Source>::Shape,)) -> <S as Source>::Element {
         let &Cons(Cons(ref rest, x), y) = sh;
         unsafe { self.source.unsafe_index(&Cons(Cons(rest.clone(), y), x)) }
     }
@@ -80,7 +79,7 @@ pub fn transpose<S, Sh>(array: S) -> DArray<<S as Source>::Shape, TransposeFn<S>
     where S: Source<Shape=Cons<Cons<Sh>>>
         , Sh: Shape {
     let Cons(Cons(rest, x), y) = array.extent().clone();
-    from_function(Cons(Cons(rest, y), x), TransposeFn { source: array })
+    from_select(Cons(Cons(rest, y), x), TransposeFn { source: array })
 }
 
 pub struct ZipWithFn<S1, S2, F>
@@ -91,13 +90,13 @@ pub struct ZipWithFn<S1, S2, F>
     f: F
 }
 
-impl <'a, S1, S2, Sh, F, O> Fn<(&'a <S1 as Source>::Shape,)> for ZipWithFn<S1, S2, F>
+impl <'a, S1, S2, Sh, F, O> Select<(&'a <S1 as Source>::Shape,)> for ZipWithFn<S1, S2, F>
     where Sh: Shape
         , S1: Source<Shape=Sh>
         , S2: Source<Shape=Sh>
         , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
     type Output = O;
-    extern "rust-call" fn call(&self, (sh,): (&Sh,)) -> O {
+    fn select(&self, (sh,): (&Sh,)) -> O {
         unsafe {
             let l = self.lhs.unsafe_index(sh);
             let r = self.rhs.unsafe_index(sh);
@@ -110,7 +109,7 @@ pub fn zip_with<S1, S2, F, O>(lhs: S1, rhs: S2, f: F) -> DArray<<S1 as Source>::
     where S1: Source
         , S2: Source<Shape=<S1 as Source>::Shape>
         , F: Fn(<S1 as Source>::Element, <S2 as Source>::Element) -> O {
-    from_function(lhs.extent().intersect_dim(rhs.extent()), ZipWithFn { lhs: lhs, rhs: rhs, f: f })
+    from_select(lhs.extent().intersect_dim(rhs.extent()), ZipWithFn { lhs: lhs, rhs: rhs, f: f })
 }
 
 pub struct TraverseFn<S, T>
@@ -119,12 +118,12 @@ pub struct TraverseFn<S, T>
     transform: T
 }
 
-impl <'a, S, Sh, T, B> Fn<(&'a Sh,)> for TraverseFn<S, T>
+impl <'a, S, Sh, T, B> Select<(&'a Sh,)> for TraverseFn<S, T>
     where Sh: Shape
         , S: Source
         , T: for<'b, 'c> Fn(&'b S, &'c Sh) -> B {
     type Output = B;
-    extern "rust-call" fn call(&self, (sh,): (&Sh,)) -> B {
+    fn select(&self, (sh,): (&Sh,)) -> B {
         (self.transform)(&self.source, sh)
     }
 }
@@ -136,7 +135,7 @@ pub fn traverse<S, Sh, F, T, A, B>(array: S, new_shape: F, transform: T) -> DArr
         , T: Fn(&S, &Sh) -> B {
 
     let shape = new_shape(array.extent());
-    from_function(shape, TraverseFn { source: array, transform: transform })
+    from_select(shape, TraverseFn { source: array, transform: transform })
 }
 
 pub struct SliceFn<A, S>
@@ -146,11 +145,11 @@ pub struct SliceFn<A, S>
     slice: S
 }
 
-impl <'a, A, S> Fn<(&'a <S as Slice>::Slice,)> for SliceFn<A, S>
+impl <'a, A, S> Select<(&'a <S as Slice>::Slice,)> for SliceFn<A, S>
     where S: Slice
         , A: Source<Shape=<S as Slice>::Full> {
     type Output = <A as Source>::Element;
-    extern "rust-call" fn call(&self, (sh,): (&<S as Slice>::Slice,)) -> <A as Source>::Element {
+    fn select(&self, (sh,): (&<S as Slice>::Slice,)) -> <A as Source>::Element {
         //Get the index in the full array
         let full_index = self.slice.full_of_slice(sh.clone());
         self.array.index(&full_index)
@@ -160,7 +159,7 @@ impl <'a, A, S> Fn<(&'a <S as Slice>::Slice,)> for SliceFn<A, S>
 pub fn slice<A, S>(array: A, slice: S) -> DArray<<S as Slice>::Slice, SliceFn<A, S>>
     where A: Source<Shape=<S as Slice>::Full>
         , S: Slice {
-    from_function(slice.slice_of_full(array.extent().clone()), SliceFn { array: array, slice: slice })
+    from_select(slice.slice_of_full(array.extent().clone()), SliceFn { array: array, slice: slice })
 }
 
 pub fn fold_s<F, S, Sh>(mut f: F, e: <S as Source>::Element, array: &S) -> UArray<Sh, Vec<<S as Source>::Element>>
@@ -223,7 +222,6 @@ struct ParallelChunk<'a, T: 'a> {
 
 unsafe impl <'a, T> Send for ParallelChunk<'a, T> where &'a mut [T]: Send { }
 
-#[unsafe_destructor]
 impl <'a, T> Drop for ParallelChunk<'a, T> {
     fn drop(&mut self) {
         use std::ptr;
@@ -253,11 +251,9 @@ impl <'a, T> ParallelChunk<'a, T> {
 struct ParallelVec<'a, T: 'a> {
     vec: &'a mut Vec<T>,
     chunk_len: usize,
-    size: usize,
     guards: Vec<ParallelChunk<'a, T>>
 }
 
-#[unsafe_destructor]
 impl <'a, T> Drop for ParallelVec<'a, T> {
     fn drop(&mut self) {
         for guard in self.guards.drain() {
@@ -292,7 +288,7 @@ impl <'a, T> ParallelVec<'a, T> {
             guards.push(ParallelChunk { slice: ptr, len: chunk_len, fill_count: 0, _marker: PhantomData });
             unsafe { ptr = ptr.offset(slice_len as isize) }
         }
-        ParallelVec { vec: vec, chunk_len: slice_len, size: size, guards: guards }
+        ParallelVec { vec: vec, chunk_len: slice_len, guards: guards }
     }
     
     fn chunks(&mut self) -> (usize, &mut [ParallelChunk<'a, T>]) {
@@ -304,7 +300,7 @@ fn parallel_vec<E, F>(len: usize, ref f: F) -> Vec<E>
     where E: Send + Sync
         , F: Fn(usize) -> E + Sync {
     let mut elems = Vec::with_capacity(len);
-    let slices = os::num_cpus();
+    let slices = 4;//TODO
     {
         let mut parallel = ParallelVec::new(&mut elems, len, slices);
         let mut guards = Vec::new();
@@ -410,7 +406,7 @@ mod tests {
     }
     
     #[test]
-    #[should_fail]
+    #[should_panic]
     fn slice_out_of_bounds() {
         let m = from_function(SHAPE2X2, |i| SHAPE2X2.to_index(i));
         let column0 = slice(&m, Cons(any(), 0));
@@ -424,5 +420,4 @@ mod tests {
         let m = UArray::new(Cons(Cons(Z, size), vs.len() / 2), vs);
         transpose(transpose(&m)) == m
     }
-
 }
