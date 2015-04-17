@@ -322,8 +322,9 @@ fn parallel_vec<E, F>(len: usize, ref f: F) -> Vec<E>
 mod tests {
     use super::*;
     use shape::{Cons, Z, Shape};
-    use source::{from_function, Source, UArray};
+    use source::{from_function, from_select, iter, Source, Select, DArray, UArray};
     use slice::{All, any};
+    use quickcheck::TestResult;
     
     
     const SHAPE2X2: Cons<Cons<Z>> = Cons(Cons(Z, 2), 2);
@@ -403,6 +404,43 @@ mod tests {
         let row1 = slice(&m, Cons(Cons(any(), 1), All));
         assert_eq!(row1.index(&Cons(Z, 0)), 2);
         assert_eq!(row1.index(&Cons(Z, 1)), 3);
+    }
+
+    pub struct Multiply<A, B> {
+        lhs: A,
+        rhs: B
+    }
+
+    impl <'a, A, B> Select<(&'a <A as Source>::Shape,)> for Multiply<A, B>
+        where A: Source<Shape=Cons<Cons<Z>>, Element=i64>
+            , B: Source<Shape=Cons<Cons<Z>>, Element=A::Element> {
+        type Output = B::Element;
+        fn select(&self, (sh,): (&<A as Source>::Shape,)) -> B::Element {
+            let Cons(Cons(_, i), j) = *sh;
+            let row = slice(&self.lhs, Cons(Cons(any(), i), All));
+            let column = slice(&self.rhs, Cons(any(), j));
+            iter(&zip_with(&row, &column, |l, r| l * r))
+                .fold(0, |l, r| l + r)
+        }
+    }
+
+    fn multiply<A, B>(lhs: A, rhs: B) -> DArray<Cons<Cons<Z>>, Multiply<A, B>>
+        where A: Source<Shape=Cons<Cons<Z>>, Element=i64>
+            , B: Source<Shape=Cons<Cons<Z>>, Element=A::Element> {
+        let Cons(Cons(_, h), _) = *lhs.extent();
+        let Cons(Cons(_, _), w) = *rhs.extent();
+        from_select(Cons(Cons(Z, h), w), Multiply { lhs: lhs, rhs: rhs })
+    }
+
+    type Mat2D = UArray<Cons<Cons<Z>>, Vec<i64>>;
+    #[quickcheck]
+    fn matrix(a: Mat2D, b: Mat2D) -> TestResult {
+        let &Cons(Cons(_, ah), w) = a.extent();
+        let &Cons(Cons(_, h), bw) = b.extent();
+        if w != h || ah == 0 || bw == 0 {
+            return TestResult::discard();
+        }
+        TestResult::from_bool(transpose(multiply(&a, &b)) == multiply(transpose(&b), transpose(&a)))
     }
     
     #[test]

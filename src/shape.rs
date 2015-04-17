@@ -1,5 +1,8 @@
 use std::fmt;
 
+#[cfg(test)]
+use quickcheck::{Arbitrary, Gen};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Z;
 
@@ -88,6 +91,25 @@ impl <S> fmt::Display for Cons<S>
     where S: fmt::Display {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} :. {}", self.0, self.1)
+    }
+}
+
+#[cfg(test)]
+impl Arbitrary for Z {
+    fn arbitrary<G: Gen>(_: &mut G) -> Self { Z }
+}
+#[cfg(test)]
+impl <T, U> Arbitrary for Cons<T, U>
+    where T: Arbitrary + Send + 'static
+        , U: Arbitrary + Send + 'static {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        Cons(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g))
+    }
+
+    fn shrink(&self) -> Box<Iterator<Item=Self>> {
+        let Cons(x, y) = self.clone();
+        Box::new(self.0.shrink().map(move |x| Cons(x, y.clone()))
+          .chain(self.1.shrink().map(move |y| Cons(x.clone(), y))))
     }
 }
 

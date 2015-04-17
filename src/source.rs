@@ -2,6 +2,9 @@ use std::cmp::PartialEq;
 use std::ops::Deref;
 use std::iter::IntoIterator;
 
+#[cfg(test)]
+use quickcheck::{Arbitrary, Gen};
+
 use shape::Shape;
 
 pub trait Source: Sync {
@@ -82,6 +85,7 @@ pub fn range_iter<S>(s: &S, start: usize, end: usize) -> Iter<&S>
     Iter { index: start, end: end, source: s }
 }
 
+#[derive(Clone, Debug)]
 pub struct UArray<S, V>
     where S: Shape
         , V: Send + Sync {
@@ -139,6 +143,29 @@ impl <E, O, S, V> PartialEq<O> for UArray<S, V>
         else {
             iter(self).zip(iter(other)).all(|(l, r)| l == r)
         }
+    }
+}
+
+#[cfg(test)]
+impl <S, E> Arbitrary for UArray<S, Vec<E>>
+    where S: Arbitrary + Shape + Send + 'static
+        , E: Arbitrary + Clone + Send + Sync +'static {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        //Take the size^(-rank) to make sure the shape does not get to large
+        let shape = <S as Arbitrary>::arbitrary(g);
+        let rank = shape.rank();
+        let shape = shape.map(|x| (x as f64).powf(-(rank as f64)).ceil() as usize );
+        let mut elems = Vec::with_capacity(shape.size());
+        for _ in 0..shape.size() {
+            elems.push(Arbitrary::arbitrary(g));
+        }
+        UArray { shape: shape, elems: elems }
+    }
+
+    fn shrink(&self) -> Box<Iterator<Item=UArray<S, Vec<E>>>> {
+        use super::{extract, compute_s};
+        let arr = self.clone();
+        Box::new(self.extent().shrink().map(move |shape| compute_s(&extract(Shape::zero_dim(), shape, &arr))))
     }
 }
 
