@@ -176,11 +176,11 @@ pub trait Select<Args> {
 
 pub struct SelectFn<F>(F);
 
-impl <F, A> Select<A> for SelectFn<F>
-    where F: Fn<A> {
-    type Output = F::Output;
-    fn select(&self, args: A) -> Self::Output {
-        self.0.call(args)
+impl <F, A, R> Select<(A,)> for SelectFn<F>
+    where F: Fn(A) -> R {
+    type Output = R;
+    fn select(&self, args: (A,)) -> Self::Output {
+        (self.0)(args.0)
     }
 }
 

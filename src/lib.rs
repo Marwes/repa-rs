@@ -1,8 +1,8 @@
-#![feature(custom_attribute, collections, core, unboxed_closures)]
-#![cfg_attr(test, feature(plugin))]
+#![cfg_attr(test, feature(plugin, custom_attribute))]
 #![cfg_attr(test, plugin(quickcheck_macros))]
 use std::marker::PhantomData;
 use std::default::Default;
+use std::mem;
 use std::thread;
 
 use shape::{Cons, Shape};
@@ -256,7 +256,8 @@ struct ParallelVec<'a, T: 'a> {
 
 impl <'a, T> Drop for ParallelVec<'a, T> {
     fn drop(&mut self) {
-        for guard in self.guards.drain() {
+        self.guards.reverse();
+        while let Some(guard) = self.guards.pop() {
             //As long as each chunk was filled completely we we know that the vector has been
             //filled continously
             if guard.len == guard.fill_count {
@@ -296,23 +297,39 @@ impl <'a, T> ParallelVec<'a, T> {
     }
 }
 
+/// Spawns a scoped thread which must be joined before the lifetime of `f`
+/// goes out of scope
+unsafe fn spawn_scoped<F>(f: F) -> thread::JoinHandle<()>
+    where F: FnOnce() + Send {
+    let box_f = Box::new(f);
+    let p = &*box_f as *const F as usize;
+    mem::forget(box_f);
+    thread::spawn(move || {
+        let box_f: Box<F> = mem::transmute(p);
+        box_f()
+    })
+}
+
 fn parallel_vec<E, F>(len: usize, ref f: F) -> Vec<E>
     where E: Send + Sync
         , F: Fn(usize) -> E + Sync {
     let mut elems = Vec::with_capacity(len);
     let slices = 4;//TODO
-    {
+    unsafe {
         let mut parallel = ParallelVec::new(&mut elems, len, slices);
         let mut guards = Vec::new();
         let (slice_len, chunks) = parallel.chunks();
         for (i, chunk) in chunks.iter_mut().enumerate() {
             let offset = i * slice_len;
-            let x = thread::scoped(move || {
+            let x = spawn_scoped(move || {
                 for j in offset..(offset + chunk.len()) {
                     chunk.push(f(j));
                 }
             });
             guards.push(x);
+        }
+        for guard in guards {
+            guard.join().unwrap();
         }
     }
     elems
