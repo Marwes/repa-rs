@@ -107,6 +107,8 @@ impl<E, S, V> UArray<S, V>
           V: Deref<Target = [E]> + Send + Sync
 {
     pub fn new(shape: S, elems: V) -> UArray<S, V> {
+        assert!(shape.size() == elems.len(),
+                "The size of the vector does not match the shape");
         UArray {
             shape: shape,
             elems: elems,
@@ -275,5 +277,20 @@ pub fn from_select<S, F, B>(shape: S, f: F) -> DArray<S, F>
     DArray {
         shape: shape,
         f: f,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shape::{Cons, Z};
+
+    use std::iter::repeat;
+
+    #[test]
+    #[should_panic]
+    fn uarray_fits_shape() {
+        UArray::new(Cons(Cons(Z, 10), 3),
+                    repeat(()).take(29).collect::<Vec<_>>());
     }
 }

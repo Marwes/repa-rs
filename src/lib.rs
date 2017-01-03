@@ -418,14 +418,7 @@ mod tests {
     }
 
     #[quickcheck]
-    fn transpose_test(vs: Vec<i32>, size: usize) -> bool {
-        // size is the length of one side of the 2 dimensional matrix
-        let size = if vs.len() / 2 == 0 {
-            0
-        } else {
-            size % (vs.len() / 2)
-        };
-        let m = UArray::new(Cons(Cons(Z, size), vs.len() / 2), vs);
+    fn transpose_test(m: Mat2D) -> bool {
         transpose(transpose(&m)) == m
     }
 }
