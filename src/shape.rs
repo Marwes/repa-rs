@@ -19,51 +19,78 @@ pub trait Shape: Clone + Sync {
     fn to_index(&self, other: &Self) -> usize;
     fn from_index(&self, other: usize) -> Self;
     fn check_bounds(&self, index: &Self) -> bool;
-    fn map<F>(&self, f: F) -> Self
-        where F: FnMut(usize) -> usize;
+    fn map<F>(&self, f: F) -> Self where F: FnMut(usize) -> usize;
 }
 impl Shape for Z {
     #[inline]
-    fn rank(&self) -> usize { 0 }
+    fn rank(&self) -> usize {
+        0
+    }
     #[inline]
-    fn zero_dim() -> Z { Z } 
+    fn zero_dim() -> Z {
+        Z
+    }
     #[inline]
-    fn unit_dim() -> Z { Z }
+    fn unit_dim() -> Z {
+        Z
+    }
     #[inline]
-    fn add_dim(&self, _: &Z) -> Z { Z }
+    fn add_dim(&self, _: &Z) -> Z {
+        Z
+    }
     #[inline]
-    fn intersect_dim(&self, _: &Z) -> Z { Z }
+    fn intersect_dim(&self, _: &Z) -> Z {
+        Z
+    }
     #[inline]
-    fn size(&self) -> usize { 1 }
+    fn size(&self) -> usize {
+        1
+    }
     #[inline]
-    fn to_index(&self, _: &Z) -> usize { 0 }
+    fn to_index(&self, _: &Z) -> usize {
+        0
+    }
     #[inline]
-    fn from_index(&self, _: usize) -> Z { Z }
+    fn from_index(&self, _: usize) -> Z {
+        Z
+    }
     #[inline]
-    fn check_bounds(&self, _index: &Z) -> bool { true }
+    fn check_bounds(&self, _index: &Z) -> bool {
+        true
+    }
     #[inline]
     fn map<F>(&self, _: F) -> Z
-        where F: FnMut(usize) -> usize {
+        where F: FnMut(usize) -> usize
+    {
         Z
     }
 }
-impl <T: Shape> Shape for Cons<T> {
+impl<T: Shape> Shape for Cons<T> {
     #[inline]
-    fn rank(&self) -> usize { self.0.rank() + 1 }
+    fn rank(&self) -> usize {
+        self.0.rank() + 1
+    }
     #[inline]
-    fn zero_dim() -> Cons<T> { Cons(Shape::zero_dim(), 0) } 
+    fn zero_dim() -> Cons<T> {
+        Cons(Shape::zero_dim(), 0)
+    }
     #[inline]
-    fn unit_dim() -> Cons<T> { Cons(Shape::unit_dim(), 1) }
+    fn unit_dim() -> Cons<T> {
+        Cons(Shape::unit_dim(), 1)
+    }
     #[inline]
     fn add_dim(&self, other: &Cons<T>) -> Cons<T> {
         Cons(self.0.add_dim(&other.0), self.1 + other.1)
     }
     #[inline]
     fn intersect_dim(&self, other: &Cons<T>) -> Cons<T> {
-        Cons(self.0.intersect_dim(&other.0), ::std::cmp::min(self.1, other.1))
+        Cons(self.0.intersect_dim(&other.0),
+             ::std::cmp::min(self.1, other.1))
     }
     #[inline]
-    fn size(&self) -> usize { self.1 * self.0.size() }
+    fn size(&self) -> usize {
+        self.1 * self.0.size()
+    }
     #[inline]
     fn to_index(&self, index: &Cons<T>) -> usize {
         self.0.to_index(&index.0) * self.1 + index.1
@@ -71,24 +98,30 @@ impl <T: Shape> Shape for Cons<T> {
     #[inline]
     fn from_index(&self, i: usize) -> Cons<T> {
         let r = if self.0.rank() == 0 { i } else { i % self.1 };
-        Cons(self.0.from_index(i / self.1) , r)
+        Cons(self.0.from_index(i / self.1), r)
     }
     #[inline]
-    fn check_bounds(&self, index: &Cons<T>) -> bool { index.1 < self.1 && self.0.check_bounds(&index.0) }
+    fn check_bounds(&self, index: &Cons<T>) -> bool {
+        index.1 < self.1 && self.0.check_bounds(&index.0)
+    }
     #[inline]
     fn map<F>(&self, mut f: F) -> Cons<T>
-        where F: FnMut(usize) -> usize {
+        where F: FnMut(usize) -> usize
+    {
         let i = f(self.1);
         Cons(self.0.map(f), i)
     }
 }
 
 impl fmt::Display for Z {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result { write!(f, "Z") }
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Z")
+    }
 }
 
-impl <S> fmt::Display for Cons<S>
-    where S: fmt::Display {
+impl<S> fmt::Display for Cons<S>
+    where S: fmt::Display
+{
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} :. {}", self.0, self.1)
     }
@@ -96,20 +129,25 @@ impl <S> fmt::Display for Cons<S>
 
 #[cfg(test)]
 impl Arbitrary for Z {
-    fn arbitrary<G: Gen>(_: &mut G) -> Self { Z }
+    fn arbitrary<G: Gen>(_: &mut G) -> Self {
+        Z
+    }
 }
 #[cfg(test)]
-impl <T, U> Arbitrary for Cons<T, U>
-    where T: Arbitrary + Send + 'static
-        , U: Arbitrary + Send + 'static {
+impl<T, U> Arbitrary for Cons<T, U>
+    where T: Arbitrary + Send + 'static,
+          U: Arbitrary + Send + 'static
+{
     fn arbitrary<G: Gen>(g: &mut G) -> Self {
         Cons(Arbitrary::arbitrary(g), Arbitrary::arbitrary(g))
     }
 
-    fn shrink(&self) -> Box<Iterator<Item=Self>> {
+    fn shrink(&self) -> Box<Iterator<Item = Self>> {
         let Cons(x, y) = self.clone();
-        Box::new(self.0.shrink().map(move |x| Cons(x, y.clone()))
-          .chain(self.1.shrink().map(move |y| Cons(x.clone(), y))))
+        Box::new(self.0
+            .shrink()
+            .map(move |x| Cons(x, y.clone()))
+            .chain(self.1.shrink().map(move |y| Cons(x.clone(), y))))
     }
 }
 
