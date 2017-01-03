@@ -4,5 +4,6 @@ name = "repa"
 version = "0.0.1"
 authors = ["Markus Westerlind <marwes91@gmail.com>"]
 
-[dev-dependencies.quickcheck]
-[dev-dependencies.quickcheck_macros]
+[dev-dependencies]
+quickcheck = "0.4.1"
+quickcheck_macros = "0.4.1"
