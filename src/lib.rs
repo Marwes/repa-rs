@@ -1,17 +1,18 @@
 #![cfg_attr(test, feature(plugin, custom_attribute))]
 #![cfg_attr(test, plugin(quickcheck_macros))]
 
+extern crate rayon;
+
 #[cfg(test)]
 extern crate quickcheck;
 
-use std::marker::PhantomData;
 use std::default::Default;
-use std::mem;
-use std::thread;
 
 use shape::{Cons, Shape};
 use source::{from_select, iter, range_iter, Source, Select, DArray, UArray};
 use slice::Slice;
+
+use rayon::prelude::*;
 
 pub mod shape;
 pub mod slice;
@@ -272,143 +273,11 @@ pub fn compute_p<S>(array: &S) -> UArray<<S as Source>::Shape, Vec<<S as Source>
     UArray::new(extent.clone(), elems)
 }
 
-struct ParallelChunk<'a, T: 'a> {
-    slice: *mut T,
-    len: usize,
-    fill_count: usize,
-    _marker: PhantomData<&'a mut T>,
-}
-
-unsafe impl<'a, T> Send for ParallelChunk<'a, T> where &'a mut [T]: Send {}
-
-impl<'a, T> Drop for ParallelChunk<'a, T> {
-    fn drop(&mut self) {
-        use std::ptr;
-        if self.slice != ptr::null_mut() {
-            for i in 0..self.fill_count {
-                unsafe {
-                    ptr::read(self.slice.offset(i as isize));
-                }
-            }
-        }
-    }
-}
-
-impl<'a, T> ParallelChunk<'a, T> {
-    fn len(&self) -> usize {
-        self.len
-    }
-
-    fn push(&mut self, value: T) {
-        use std::ptr;
-        if self.fill_count >= self.len {
-            panic!("push called to full guard");
-        }
-        unsafe { ptr::write(self.slice.offset(self.fill_count as isize), value) };
-        self.fill_count += 1;
-    }
-}
-
-/// A wrapper around a vector which has a capacity for atleast `size` elements
-struct ParallelVec<'a, T: 'a> {
-    vec: &'a mut Vec<T>,
-    chunk_len: usize,
-    guards: Vec<ParallelChunk<'a, T>>,
-}
-
-impl<'a, T> Drop for ParallelVec<'a, T> {
-    fn drop(&mut self) {
-        self.guards.reverse();
-        while let Some(guard) = self.guards.pop() {
-            // As long as each chunk was filled completely we we know that the vector has been
-            // filled continously
-            if guard.len == guard.fill_count {
-                let new_len = self.vec.len() + guard.len;
-                unsafe {
-                    self.vec.set_len(new_len);
-                }
-            } else {
-                // This chunk was not completely filled so we just drop the remaining chunks
-                break;
-            }
-        }
-    }
-}
-
-impl<'a, T> ParallelVec<'a, T> {
-    fn new(vec: &'a mut Vec<T>, size: usize, chunks: usize) -> ParallelVec<'a, T> {
-        // Make sure the vec is empty so that existing elements does not get overwritten
-        // when an element is pushed to a chunk
-        vec.clear();
-        let additional = size - vec.len();
-        vec.reserve(additional);
-        let mut guards = Vec::new();
-
-        let slice_len = (size + chunks - 1) / chunks;
-        let mut ptr = vec.as_mut_ptr();
-        let end = unsafe { ptr.offset(size as isize) };
-        while ptr < end {
-            let chunk_len = ::std::cmp::min(slice_len,
-                                            (end as usize - ptr as usize) /
-                                            ::std::mem::size_of::<T>());
-            guards.push(ParallelChunk {
-                slice: ptr,
-                len: chunk_len,
-                fill_count: 0,
-                _marker: PhantomData,
-            });
-            unsafe { ptr = ptr.offset(slice_len as isize) }
-        }
-        ParallelVec {
-            vec: vec,
-            chunk_len: slice_len,
-            guards: guards,
-        }
-    }
-
-    fn chunks(&mut self) -> (usize, &mut [ParallelChunk<'a, T>]) {
-        (self.chunk_len, &mut self.guards)
-    }
-}
-
-/// Spawns a scoped thread which must be joined before the lifetime of `f`
-/// goes out of scope
-unsafe fn spawn_scoped<F>(f: F) -> thread::JoinHandle<()>
-    where F: FnOnce() + Send
-{
-    let box_f = Box::new(f);
-    let p = &*box_f as *const F as usize;
-    mem::forget(box_f);
-    thread::spawn(move || {
-        let box_f: Box<F> = mem::transmute(p);
-        box_f()
-    })
-}
-
 fn parallel_vec<E, F>(len: usize, ref f: F) -> Vec<E>
     where E: Send + Sync,
           F: Fn(usize) -> E + Sync
 {
-    let mut elems = Vec::with_capacity(len);
-    let slices = 4;//TODO
-    unsafe {
-        let mut parallel = ParallelVec::new(&mut elems, len, slices);
-        let mut guards = Vec::new();
-        let (slice_len, chunks) = parallel.chunks();
-        for (i, chunk) in chunks.iter_mut().enumerate() {
-            let offset = i * slice_len;
-            let x = spawn_scoped(move || {
-                for j in offset..(offset + chunk.len()) {
-                    chunk.push(f(j));
-                }
-            });
-            guards.push(x);
-        }
-        for guard in guards {
-            guard.join().unwrap();
-        }
-    }
-    elems
+    (0..len).into_par_iter().map(f).collect()
 }
 
 #[cfg(test)]
